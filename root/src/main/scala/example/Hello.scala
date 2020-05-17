@@ -15,6 +15,7 @@ trait Algebra[F[_]] {
 
 object Algebra {
 
+
   @wrikito def `a*`[F[_]: Applicative]: Algebra[F] = new Algebra[F] {
     override def foo(i: Int, j: Int): ({ type Z[UUUU] = F[UUUU] })#Z[Int] = Applicative[F].pure(i + j)
 

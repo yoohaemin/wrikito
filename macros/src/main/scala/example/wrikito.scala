@@ -4,7 +4,7 @@ import scala.annotation.StaticAnnotation
 import scala.annotation.compileTimeOnly
 import scala.reflect.macros.whitebox
 
-@compileTimeOnly("enable macro paradise to expand macro annotations")
+@compileTimeOnly("Enable macro paradise to expand macro annotations")
 class wrikito extends StaticAnnotation {
   def macroTransform(annottees: Any*): Any = macro wrikito.impl
 }
@@ -15,11 +15,11 @@ object wrikito {
     import c.universe._
 
     /**
-     * Build a WriterT wrapped type constructor from a given type constructor.
-     *
+      * Build a WriterT wrapped type constructor from a given type constructor.
+      *
      * @param typeName `F` as in `Algebra[F]` or `F[Int]`
-     * @return `WriterT[F, List[Call], *]`
-     */
+      * @return `WriterT[F, List[Call], *]`
+      */
     def writerTAppliedType(typeName: Tree): Tree =
       SelectFromTypeTree(
         CompoundTypeTree(
@@ -57,9 +57,13 @@ object wrikito {
         TypeName("X")
       )
 
-    def addWriterT(impl: ClassDef): ClassDef = {
+    def transformClassDef(impl: ClassDef): ClassDef = {
       val ClassDef(modifiers, typeName, typeDefs, Template(parents, self, body)) = impl
-      val AppliedTypeTree(superClassName, classEffectType :: _)                  = parents.head
+
+      val (superClassName, classEffectType) = parents match {
+        case AppliedTypeTree(superClassName, classEffectType :: Nil) :: _ => (superClassName, classEffectType)
+        case _ => c.abort(c.enclosingPosition, "Class definition should extend a class/trait parameterized with one type")
+      }
 
       val writerTAppliedParent = AppliedTypeTree(superClassName, writerTAppliedType(classEffectType) :: Nil)
 
@@ -75,7 +79,8 @@ object wrikito {
             AppliedTypeTree(localReturnEffectType, resultType :: Nil),
             rhs: Tree
             ) if !contains(flagSet, Flag.PRIVATE) =>
-          def base(expr: Tree) =
+
+          def createWriterTLiftedTree(expr: Tree) =
             q"""
                  val __writerT_lifted = _root_.cats.data.WriterT.liftF[$localReturnEffectType, _root_.scala.List[_root_.example.Call], $resultType]($expr)
                  __writerT_lifted.tell(_root_.scala.List(_root_.example.Call(${name.encodedName.toString}, ${vparamss
@@ -85,12 +90,10 @@ object wrikito {
           //Rewrite the method body
           val writerTAppliedRhs = rhs match {
             case Block(stmts, expr) =>
-              val Block(lifted, result) = base(expr)
-
+              val Block(lifted, result) = createWriterTLiftedTree(expr)
               Block(stmts ++ lifted, result)
-
-            case expr: Apply =>
-              base(expr)
+            case expr =>
+              createWriterTLiftedTree(expr)
           }
 
           DefDef(
@@ -104,24 +107,27 @@ object wrikito {
         case other => other
       }
 
-      //writerTAppliedParent
       ClassDef(modifiers, typeName, typeDefs, Template(writerTAppliedParent :: parents.tail, self, writerTAppliedBody))
     }
 
-    def modifiedDef(defdef: DefDef): c.Expr[Any] = {
+    def buildWriterTImplDef(defdef: DefDef): c.Expr[Any] = {
       val DefDef(mods, name: TermName, tparams, vparamss, tpt, rhs) = defdef
-      val AppliedTypeTree(superClassName, classEffectType :: Nil)   = tpt
+
+      val (superClassName, classEffectType) = tpt match {
+        case AppliedTypeTree(superClassName, classEffectType :: Nil)   => (superClassName, classEffectType)
+        case _ => c.abort(c.enclosingPosition, "Wrikito currently only works on methods with explicitly specified types.")
+      }
 
       val applyWriterT = rhs match {
-        case Block(trees, tree) =>
+        case Block(trees, tree) if trees.exists(tree => showRaw(tree).startsWith("ClassDef")) => //TODO find a better way
           Block(
             trees.map {
-              case c: ClassDef => addWriterT(c)
+              case c: ClassDef => transformClassDef(c)
               case t           => t
             },
             tree
           )
-        case _ => c.abort(c.enclosingPosition, "No class!")
+        case _ => c.abort(c.enclosingPosition, "Rhs of the annotated method definition must be a class implementation.")
       }
 
       val writerTApplied = DefDef(
@@ -133,19 +139,12 @@ object wrikito {
         applyWriterT
       )
 
-      c.Expr[Any](
-        q"""$defdef; $writerTApplied"""
-      )
+      c.Expr[Any](q"""$defdef; $writerTApplied""")
     }
 
-
-
-    println(
-      annottees
-    )
     annottees.map(_.tree) match {
-      case (classDecl: DefDef) :: Nil => modifiedDef(classDecl)
-      case _                          => c.abort(c.enclosingPosition, "Invalid annottee")
+      case (algebraImpl: DefDef) :: Nil => buildWriterTImplDef(algebraImpl)
+      case _                            => c.abort(c.enclosingPosition, "Wrikito currently only works on `def`s.")
     }
   }
 }
