@@ -20,7 +20,9 @@ lazy val root = (project in file("root"))
 
 lazy val macros = project.settings(
   name := "macros",
-  scalacOptions ++= Seq("-Xlint", "-Ymacro-annotations", "-language:_"),
+  scalacOptions ++= Seq("-Xlint", "-Ymacro-annotations", "-language:_",
+//    "-Ymacro-debug-lite"
+  ),
   libraryDependencies ++= Seq(
     scalaTest % Test,
     "org.typelevel" %% "cats-tagless-macros" % "0.11",
