@@ -14,6 +14,7 @@ lazy val root = (project in file("root"))
       scalaTest % Test,
       "org.typelevel" %% "cats-tagless-macros" % "0.11",
       "org.scala-lang" % "scala-reflect" % "2.13.1",
+      "com.lihaoyi" %% "pprint" % "0.5.6"
     ),
     addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVersion.full)
   ).dependsOn(macros)
